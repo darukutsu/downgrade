@@ -72,6 +72,9 @@ on the ALA.
     Pacman log file, default value is extracted from pacman configuration file, or
     otherwise defaults to _/var/log/pacman.log_.
 
+  * `--git`:
+    Uses git for choosing version, viable only for aur packages
+
   * `--maxdepth`=<INTEGER>:
     Maximum depth to search for cached packages, defaults to _1_.
 
