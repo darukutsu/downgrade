@@ -19,6 +19,7 @@ $(gettext "Options"):
                   $(gettext "pacman log file,")
                   $(gettext "default value taken from pacman configuration file,")
                   $(gettext "or otherwise defaults to") "/var/log/pacman.log"
+  --git           $(gettext "uses git for choosing version, viable only for aur packages")
   --maxdepth      <$(gettext "integer")>
                   $(gettext "maximum depth to search for cached packages, defaults to") 1
   --ala-url       <url>
@@ -196,6 +197,25 @@ matches_name_version_filter() {
   esac
 }
 
+search_git() {
+  local name=$1 pairs path
+
+  for cache in "${PACMAN_CACHE[@]}"; do
+    path="$cache/$name"
+    if ! [[ -d "$path" ]]; then
+      gettext "\`$path\" not a directory, skipping..."
+      echo >&2
+      continue
+    fi
+
+    # TODO: in future could be enhanced by counting every commit 
+    # that DOES NOT change version as minor like 0.0.1-2 instead of any
+    pairs=$(git -C "$path" log -p --oneline --format="GIT: %h" PKGBUILD | grep -e 'GIT:.*' -e '+pkgver' | grep -Pzo 'GIT: .*\n\+pkgver=.*\n' | sed 's/GIT: \|+pkgver=//' | tr -d '\0')
+    # shellcheck disable=SC2086
+    echo "$path" $pairs | awk '{for(i=2;i<NF;i+=2) printf "%s %s %s\n", $1, $(i+1), $i}' | sort -V | awk '{for(i=2;i<NF;i+=2) printf "%s-%s-%s-any.pkg.tar.gz\n", $(i+1), $1, $i}'
+  done
+}
+
 search_ala() {
   local name=$1 uriname pkgfile_re index
 
@@ -319,6 +339,11 @@ process_term() {
   fi
 
   candidates=($(printf '%s\n' "${candidates[@]}" | sort_packages))
+  
+  # this is already sorted
+  if ((DOWNGRADE_FROM_GIT)) && ((${#candidates[@]} == 0)); then
+    candidates+=($(search_git "$name" | filter_packages "$name" "$operator" "$version"))
+  fi
 
   if (("${#candidates[@]}" == 0)); then
     {
@@ -440,6 +465,9 @@ parse_options() {
           exit 1
         fi
         ;;
+      --git)
+        DOWNGRADE_FROM_GIT=1
+        ;;
       --maxdepth)
         if [[ -n "$2" ]]; then
           shift
@@ -524,7 +552,7 @@ parse_options() {
 }
 
 cli() {
-  local conf_args=()
+  local conf_args=() path commit_hash
 
   # Get configuration and command-line arguments and parse everything
   read_downgrade_conf conf_args
@@ -536,7 +564,27 @@ cli() {
 
   # Proceed with rest of workflow
   main "${terms[@]}"
-  pacman -U "${pacman_args[@]}" "${to_install[@]}"
+  if [[ $DOWNGRADE_FROM_GIT ]]; then
+    for item in "${to_install[@]}"; do
+      if [[ ${item:0:1} != '/' ]] && [[ ${item:0:5} != "https" ]];then
+        commit_hash=${item%%-*}
+        path="$(echo "$item" | sed 's/[a-z0-9]*-\(.*\)-[0-9.]*.-any.pkg.tar.gz/\1/')"
+        to_install=("${to_install/$item/}")
+
+        pushd "$path" >/dev/null
+        su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -si"
+        # NOTE: when force-canceling, users might need to manually do checkout master
+        # otherwise they won't be able to update using yay or whatever i guess
+        # maybe use git switch -
+        su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
+        popd >/dev/null
+      fi
+    done
+  fi
+
+  if [[ -n "${to_install[*]}" ]]; then
+    pacman -U "${pacman_args[@]}" "${to_install[@]}"
+  fi
   prompt_to_ignore "${to_ignore[@]}"
 }
 
@@ -545,6 +593,7 @@ PACMAN="pacman"
 PACMAN_CONF="/etc/pacman.conf"
 DOWNGRADE_ARCH="$(pacman-conf Architecture | head -n 1)"
 DOWNGRADE_ALA_URL="https://archive.archlinux.org"
+DOWNGRADE_FROM_GIT=0
 DOWNGRADE_FROM_ALA=1
 DOWNGRADE_FROM_CACHE=1
 DOWNGRADE_MAXDEPTH=1
