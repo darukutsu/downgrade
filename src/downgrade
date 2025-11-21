@@ -569,7 +569,7 @@ cli() {
       if [[ ${item:0:1} != '/' ]] && [[ ${item:0:5} != "https" ]];then
         commit_hash=${item%%-*}
         path="$(echo "$item" | sed 's/[a-z0-9]*-\(.*\)-[0-9.]*.-any.pkg.tar.gz/\1/')"
-        to_install=("${to_install/$item/}")
+        to_install=("${to_install[@]/$item/}")
 
         pushd "$path" >/dev/null
         su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -si"
