@@ -226,7 +226,8 @@ search_ala() {
   # shellcheck disable=SC2001
   uriname=$(sed 's/+/%2B/g' <<<"$name")
 
-  pkgfile_re="$uriname-[^-]+-[0-9.]+-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
+  ## in case versioning contains commit hash or something non traditional
+  pkgfile_re="$name-.*-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
   index="$DOWNGRADE_ALA_URL/packages/${uriname:0:1}/$uriname/"
 
   curl --fail --silent "$index" | sed_msg "to parse A.L.A." -E '
@@ -341,8 +342,8 @@ process_term() {
   candidates=($(printf '%s\n' "${candidates[@]}" | sort_packages))
   
   # this is already sorted
-  if ((DOWNGRADE_FROM_GIT)) && ((${#candidates[@]} == 0)); then
-    candidates+=($(search_git "$name" | filter_packages "$name" "$operator" "$version"))
+  if ((DOWNGRADE_FROM_GIT)); then
+    candidates=($(search_git "$name" | filter_packages "$name" "$operator" "$version") "${candidates[@]}")
   fi
 
   if (("${#candidates[@]}" == 0)); then
@@ -569,28 +570,21 @@ cli() {
       if [[ ${item:0:1} != '/' ]] && [[ ${item:0:5} != "https" ]];then
         commit_hash=${item%%-*}
         path="$(echo "$item" | sed 's/[a-z0-9]*-\(.*\)-[0-9.]*.-any.pkg.tar.gz/\1/')"
-        local new_list=()
-        for i in "${to_install[@]}";do
-          if [[ "$i" != "$item" ]]; then
-            new_list+=("$i")
-          fi
-        done
-        to_install=("${new_list[@]}")
 
         pushd "$path" >/dev/null
-        su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -si"
+        su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -fs"
         # NOTE: when force-canceling, users might need to manually do checkout master
         # otherwise they won't be able to update using yay or whatever i guess
         # maybe use git switch -
         su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
+        build="$(ls -t "$path"/*.pkg.tar.* | head -1)"
+        to_install=("${to_install[@]/$item/$build}")
         popd >/dev/null
       fi
     done
   fi
 
-  if (( ${#to_install[@]} )); then
-    pacman -U "${pacman_args[@]}" "${to_install[@]}"
-  fi
+  pacman -U "${pacman_args[@]}" "${to_install[@]}"
   prompt_to_ignore "${to_ignore[@]}"
 }
 
