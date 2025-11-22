@@ -552,8 +552,37 @@ parse_options() {
   fi
 }
 
+build_pkg() {
+  local path commit_hash
+  for item in "${to_install[@]}"; do
+    if [[ ${item:0:1} != '/' ]] && [[ ${item:0:5} != "https" ]];then
+      commit_hash=${item%%-*}
+      path="$(echo "$item" | sed 's/[a-z0-9]*-\(.*\)-[0-9.]*.-any.pkg.tar.gz/\1/')"
+
+      pushd "$path" >/dev/null
+      su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -fs"
+      # NOTE: when force-canceling, users might need to manually do checkout master
+      # otherwise they won't be able to update using yay or whatever i guess
+      # maybe use git switch -
+      su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
+      # rename arbitrary name to tar that was just build
+      build="$(ls -t "$path"/*.pkg.tar.* | head -1)"
+      for i in $(seq ${#to_install[@]}); do
+        if [[ "${to_install[i-1]}" = "$item" ]]; then
+          # this way we prevent unintentional renaming
+          # like `path/something` `path/something-other`, 
+          # both would got renamed when matching `path/something`
+          to_install=("${to_install[i-1]/$item/$build}")
+          break
+        fi
+      done
+      popd >/dev/null
+    fi
+  done
+}
+
 cli() {
-  local conf_args=() path commit_hash
+  local conf_args=()
 
   # Get configuration and command-line arguments and parse everything
   read_downgrade_conf conf_args
@@ -566,22 +595,7 @@ cli() {
   # Proceed with rest of workflow
   main "${terms[@]}"
   if [[ $DOWNGRADE_FROM_GIT ]]; then
-    for item in "${to_install[@]}"; do
-      if [[ ${item:0:1} != '/' ]] && [[ ${item:0:5} != "https" ]];then
-        commit_hash=${item%%-*}
-        path="$(echo "$item" | sed 's/[a-z0-9]*-\(.*\)-[0-9.]*.-any.pkg.tar.gz/\1/')"
-
-        pushd "$path" >/dev/null
-        su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -fs"
-        # NOTE: when force-canceling, users might need to manually do checkout master
-        # otherwise they won't be able to update using yay or whatever i guess
-        # maybe use git switch -
-        su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
-        build="$(ls -t "$path"/*.pkg.tar.* | head -1)"
-        to_install=("${to_install[@]/$item/$build}")
-        popd >/dev/null
-      fi
-    done
+    build_pkg
   fi
 
   pacman -U "${pacman_args[@]}" "${to_install[@]}"
