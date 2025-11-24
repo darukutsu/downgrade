@@ -56,13 +56,13 @@ read_pacman_conf() {
 }
 
 read_downgrade_conf() {
-  local var=$1
+  local var="$1"
 
   eval "$var=($(grep -E -v '^ *(#.*)?$' "$DOWNGRADE_CONF" 2>/dev/null | xargs printf '%q '))"
 }
 
 read_unique() {
-  local var=$1
+  local var="$1"
   shift
 
   if [[ -n "$*" ]]; then
@@ -98,7 +98,7 @@ present_packages() {
 
   (($#)) || return 1
 
-  repo="$(pacman -Ss "^${pkgname}$" | awk -F'/' 'NR==1 {print $1}')"
+  repo="$(pacman -Ss "^$pkgname$" | awk -F'/' 'NR==1 {print $1}')"
   repo=${repo:-foreign/aur}
 
   gettext 'Available packages'
@@ -120,7 +120,7 @@ read_selection() {
 }
 
 is_yes() {
-  local ans=${1,,} y
+  local ans="${1,,}" y
 
   y=$(gettext 'y')
 
@@ -152,7 +152,7 @@ prompt_to_ignore() {
 }
 
 filter_packages() {
-  local name=$1 operator=$2 version=$3 pkg
+  local name="$1" operator="$2" version="$3" pkg
 
   while read -r pkg; do
     if matches_name_version_filter "$pkg" "$name" "$operator" "$version"; then
@@ -162,14 +162,14 @@ filter_packages() {
 }
 
 matches_name_version_filter() {
-  local pkg=$1 name=$2 operator=$3 search_version=$4 pkg_version version_regex
+  local pkg="$1" name="$2" operator="$3" search_version="$4" pkg_version version_regex
 
   if [[ -z "$operator" ]] || [[ -z "$version" ]]; then
     return 0
   fi
 
   # version: 2025.11.12.r15.g0eed3fe
-  version_regex="[^-]+[0-9.]+(\\.[a-zA-Z0-9])*"
+  version_regex="[0-9.]+(.[a-zA-Z0-9])*"
   pkg_version=$(sed -r "s/.*$name-($version_regex)(-[a-z0-9]{6,})?-(any|$DOWNGRADE_ARCH)\\.(git)?pkg\\.tar\\.(gz|xz|zst)/\1/g" <<<"$pkg")
   cmp=$(vercmp "$pkg_version" "$search_version")
 
@@ -199,10 +199,10 @@ matches_name_version_filter() {
 }
 
 search_git() {
-  local name=$1 pairs path
+  local name="$1" pairs path
 
   for cache in "${PACMAN_CACHE[@]}"; do
-    path="$cache/$name"
+    path="$cache/$name" # directory name
     if ! [[ -d "$path/.git" ]]; then
       gettext "\`$path\" not a git directory, skipping..."
       echo >&2
@@ -212,13 +212,16 @@ search_git() {
     # TODO: in future could be enhanced by counting every commit
     # that DOES NOT change version as minor like 0.0.1-2 instead of any
     pairs=$(git -C "$path" log -p --oneline --format="GIT: %h" PKGBUILD | grep -e 'GIT:.*' -e '+pkgver' | grep -Pzo 'GIT: .*\n\+pkgver=.*\n' | sed 's/GIT: \|+pkgver=//' | tr -d '\0')
+
+    # We could remove packages that are on local machine in this process,
+    # however since pathname can be anything except '\0' its better to rename output pkg
     # shellcheck disable=SC2086
-    echo "$path" $pairs | awk '{for(i=2;i<NF;i+=2) printf "%s-%s-%s-any.gitpkg.tar.gz\n", $1, $(i+1), $i}' | sort -V
+    echo "$path/$name" "$pairs" | awk '{for(i=2;i<NF;i+=2) printf "%s-%s-%s-any.gitpkg.tar.gz\n", $1, $(i+1), $i}' | sort -V
   done
 }
 
 search_ala() {
-  local name=$1 uriname pkgfile_re index
+  local name="$1" uriname pkgfile_re index
 
   # This is a *very* naive URI encoding. Packages typically don't use characters
   # that need encoding, so we'll just add them as we get bug reports. So far +
@@ -237,9 +240,11 @@ search_ala() {
 }
 
 search_cache() {
-  local name=$1 pkgfile_re index
+  local name="$1" pkgfile_re index
 
-  pkgfile_re="$name-[^-]+-[0-9.]+-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
+  # version: 2025.11.12.r15.g0eed3fe
+  version_regex="[0-9.]+(.[a-zA-Z0-9])*"
+  pkgfile_re="$name-($version_regex)(-[a-z0-9]{6,})?-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
 
   # Delay this defaulting so #read_pacman_conf behavior is tested
   if ((!${#PACMAN_CACHE[@]})); then
@@ -280,6 +285,7 @@ output_package() {
   fi
 
   # Remote or local file
+  #if [[ $path =~ ^/ && -f $path ]]; then # this is maybe better approach however we lose ability to prefix files
   if [[ $path =~ ^/ && ! ($path =~ gitpkg) ]]; then
     location="$(dirname "$path")"
     timestamp=$(stat -c '%y' "$path" | cut -d' ' -f1)
@@ -305,7 +311,7 @@ output_package() {
 
 # <package name> <package path>
 extract_version_parts() {
-  local pkgname=$1 path=$2
+  local pkgname="$1" path="$2"
 
   sed '
     # Strip first path component
@@ -324,27 +330,27 @@ extract_version_parts() {
 
 # shellcheck disable=SC2207
 process_term() {
-  local term=$1 name operator version candidates choice
+  local term="$1" name operator version candidates choice
 
   read -r name operator version < \
     <(sed -r "s/(.*[^<>=~])(<=|>=|<|>|=|=~|==)([^<>=~].*)/\1 \2 \3/g" <<<"$term")
 
-  installed=($(previously_installed "$name"))
+  installed=("$(previously_installed "$name")")
   current=$(currently_installed "$name")
 
   candidates=()
   if ((DOWNGRADE_FROM_CACHE)); then
-    candidates+=($(search_cache "$name" | filter_packages "$name" "$operator" "$version"))
+    candidates+=("$(search_cache "$name" | filter_packages "$name" "$operator" "$version")")
   fi
   if ((DOWNGRADE_FROM_ALA)) && { ((!DOWNGRADE_PREFER_CACHE)) || ((${#candidates[@]} == 0)); }; then
-    candidates=($(search_ala "$name" | filter_packages "$name" "$operator" "$version") "${candidates[@]}")
+    candidates=("$(search_ala "$name" | filter_packages "$name" "$operator" "$version")" "${candidates[@]}")
   fi
 
-  candidates=($(printf '%s\n' "${candidates[@]}" | sort_packages))
+  candidates=("$(printf '%s\n' "${candidates[@]}" | sort_packages)")
 
   # this is already sorted
   if ((DOWNGRADE_FROM_GIT)); then
-    candidates=($(search_git "$name" | filter_packages "$name" "$operator" "$version") "${candidates[@]}")
+    candidates=("$(search_git "$name" | filter_packages "$name" "$operator" "$version")" "${candidates[@]}")
   fi
 
   if (("${#candidates[@]}" == 0)); then
@@ -396,7 +402,7 @@ main() {
     fi
   done
 
-  return $exit_code
+  return "$exit_code"
 }
 
 parse_options() {
@@ -560,7 +566,7 @@ build_pkg() {
     release_candidate='.[a-zA-Z0-9]*'
     hash='[a-z0-9]{6,}'
     gitpkg_regex="(.*)-($version($release_candidate)*|$hash)-($hash)-(any|$DOWNGRADE_ARCH).gitpkg.tar.gz"
-    path=$(sed -r "s/$gitpkg_regex/\1/" <<<"$item")
+    path=$(dirname "$item")
     commit_hash=$(sed -r "s/$gitpkg_regex/\4/" <<<"$item")
 
     pushd "$path" >/dev/null
@@ -600,9 +606,7 @@ cli() {
   pacman -U "${pacman_args[@]}" "${to_install[@]}"
   # rename to previous name so we can use it later if we want
   for file in "${to_install[@]}"; do
-    # TODO: delete this - for some reason on my system it shows that file exists
-    find "${PACMAN_CACHE[@]}" -maxdepth 1 -type f -name "$(basename "$file")" -exec echo {} exists \;
-    find "${PACMAN_CACHE[@]}" -maxdepth 1 -type f -name "$(basename "$file")" -exec mv -v {} "${file/gitpkg/pkg}" \;
+    find "${PACMAN_CACHE[@]}" -maxdepth 2 -type f -name "$(basename "$file")" -exec mv -v {} "${file/gitpkg/pkg}" \;
   done
   prompt_to_ignore "${to_ignore[@]}"
 }
