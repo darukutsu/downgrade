@@ -208,7 +208,7 @@ search_git() {
       continue
     fi
 
-    # TODO: in future could be enhanced by counting every commit 
+    # TODO: in future could be enhanced by counting every commit
     # that DOES NOT change version as minor like 0.0.1-2 instead of any
     pairs=$(git -C "$path" log -p --oneline --format="GIT: %h" PKGBUILD | grep -e 'GIT:.*' -e '+pkgver' | grep -Pzo 'GIT: .*\n\+pkgver=.*\n' | sed 's/GIT: \|+pkgver=//' | tr -d '\0')
     # shellcheck disable=SC2086
@@ -553,26 +553,32 @@ parse_options() {
 }
 
 build_pkg() {
-  local path commit_hash
+  local path commit_hash build_failed
   for item in "${to_install[@]}"; do
-    if [[ ${item:0:1} != '/' ]] && [[ ${item:0:5} != "https" ]];then
+    if [[ ${item:0:1} != '/' ]] && [[ ${item:0:5} != "https" ]]; then
       commit_hash=${item%%-*}
-      path="$(echo "$item" | sed 's/[a-z0-9]*-\(.*\)-[0-9.]*.-any.pkg.tar.gz/\1/')"
+      # matches version or commit_hash that is longer than 6
+      path="$(echo "$item" | sed -E 's/[a-z0-9]*-(.*)-([0-9.]+-[0-9]+|[a-z0-9]{6,})-any.pkg.tar.gz/\1/')"
 
       pushd "$path" >/dev/null
       su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -fs"
+      build_failed=$?
       # NOTE: when force-canceling, users might need to manually do checkout master
       # otherwise they won't be able to update using yay or whatever i guess
       # maybe use git switch -
       su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
+      if $build_failed; then
+        exit 1
+      fi
       # rename arbitrary name to tar that was just build
+      # shellcheck disable=SC2012
       build="$(ls -t "$path"/*.pkg.tar.* | head -1)"
       for i in $(seq ${#to_install[@]}); do
-        if [[ "${to_install[i-1]}" = "$item" ]]; then
+        if [[ "${to_install[i - 1]}" = "$item" ]]; then
           # this way we prevent unintentional renaming
-          # like `path/something` `path/something-other`, 
+          # like `path/something` `path/something-other`,
           # both would got renamed when matching `path/something`
-          to_install=("${to_install[i-1]/$item/$build}")
+          to_install=("${to_install[i - 1]/$item/$build}")
           break
         fi
       done
