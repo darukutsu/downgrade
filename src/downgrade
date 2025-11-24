@@ -168,8 +168,9 @@ matches_name_version_filter() {
     return 0
   fi
 
-  version_regex="[^-]+-[0-9.]+"
-  pkg_version=$(sed -r "s/.*$name-($version_regex)-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)/\1/g" <<<"$pkg")
+  # version: 2025.11.12.r15.g0eed3fe
+  version_regex="[^-]+[0-9.]+(\\.[a-zA-Z0-9])*"
+  pkg_version=$(sed -r "s/.*$name-($version_regex)(-[a-z0-9]{6,})?-(any|$DOWNGRADE_ARCH)\\.(git)?pkg\\.tar\\.(gz|xz|zst)/\1/g" <<<"$pkg")
   cmp=$(vercmp "$pkg_version" "$search_version")
 
   case "$operator" in
@@ -202,8 +203,8 @@ search_git() {
 
   for cache in "${PACMAN_CACHE[@]}"; do
     path="$cache/$name"
-    if ! [[ -d "$path" ]]; then
-      gettext "\`$path\" not a directory, skipping..."
+    if ! [[ -d "$path/.git" ]]; then
+      gettext "\`$path\" not a git directory, skipping..."
       echo >&2
       continue
     fi
@@ -212,7 +213,7 @@ search_git() {
     # that DOES NOT change version as minor like 0.0.1-2 instead of any
     pairs=$(git -C "$path" log -p --oneline --format="GIT: %h" PKGBUILD | grep -e 'GIT:.*' -e '+pkgver' | grep -Pzo 'GIT: .*\n\+pkgver=.*\n' | sed 's/GIT: \|+pkgver=//' | tr -d '\0')
     # shellcheck disable=SC2086
-    echo "$path" $pairs | awk '{for(i=2;i<NF;i+=2) printf "%s %s %s\n", $1, $(i+1), $i}' | sort -V | awk '{for(i=2;i<NF;i+=2) printf "%s-%s-%s-any.pkg.tar.gz\n", $(i+1), $1, $i}'
+    echo "$path" $pairs | awk '{for(i=2;i<NF;i+=2) printf "%s-%s-%s-any.gitpkg.tar.gz\n", $1, $(i+1), $i}' | sort -V 
   done
 }
 
@@ -279,7 +280,7 @@ output_package() {
   fi
 
   # Remote or local file
-  if [[ $path =~ ^/ ]]; then
+  if [[ $path =~ ^/ && ! ($path =~ gitpkg) ]]; then
     location="$(dirname "$path")"
     timestamp=$(stat -c '%y' "$path" | cut -d' ' -f1)
   else
@@ -314,7 +315,7 @@ extract_version_parts() {
     s|^.\{'${#pkgname}'\}-\?||;
 
     # Strip package extension
-    s|\.pkg\(\.tar\)\?\(\.[a-z0-9A-Z]\+\)\?$||;
+    s|\.\(git\)?pkg\(\.tar\)\?\(\.[a-z0-9A-Z]\+\)\?$||;
 
     # (epoch:)?version(-release)?(-arch)? -> epoch,version,release,arch
     s|\(\([^:]*\):\)\?\([^-]*\)\(-\([^-]*\)\)\?\(-\(.*\)\)\?|\2,\3,\5,\7|;
@@ -340,7 +341,7 @@ process_term() {
   fi
 
   candidates=($(printf '%s\n' "${candidates[@]}" | sort_packages))
-  
+
   # this is already sorted
   if ((DOWNGRADE_FROM_GIT)); then
     candidates=($(search_git "$name" | filter_packages "$name" "$operator" "$version") "${candidates[@]}")
@@ -553,38 +554,28 @@ parse_options() {
 }
 
 build_pkg() {
-  local path commit_hash build_failed
-  for item in "${to_install[@]}"; do
-    if [[ ${item:0:1} != '/' ]] && [[ ${item:0:5} != "https" ]]; then
-      commit_hash=${item%%-*}
-      # matches version or commit_hash that is longer than 6
-      path="$(echo "$item" | sed -E 's/[a-z0-9]*-(.*)-([0-9.]+-[0-9]+|[a-z0-9]{6,})-any.pkg.tar.gz/\1/')"
+  local item="$1" path commit_hash build_failed version release_candidate hash gitpkg_regex
+  if [[ "$item" =~ .*gitpkg.tar.gz ]]; then
+    version='[^-]+[0-9.]+'
+    release_candidate='.[a-zA-Z0-9]*'
+    hash='[a-z0-9]{6,}'
+    gitpkg_regex="(.*)-($version($release_candidate)*|$hash)-($hash)-(any|$DOWNGRADE_ARCH).gitpkg.tar.gz"
+    path=$(sed -r "s/$gitpkg_regex/\1/" <<<"$item")
+    commit_hash=$(sed -r "s/$gitpkg_regex/\4/" <<<"$item")
 
-      pushd "$path" >/dev/null
-      su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -fs"
-      build_failed=$?
-      # NOTE: when force-canceling, users might need to manually do checkout master
-      # otherwise they won't be able to update using yay or whatever i guess
-      # maybe use git switch -
-      su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
-      if $build_failed; then
-        exit 1
-      fi
-      # rename arbitrary name to tar that was just build
-      # shellcheck disable=SC2012
-      build="$(ls -t "$path"/*.pkg.tar.* | head -1)"
-      for i in $(seq ${#to_install[@]}); do
-        if [[ "${to_install[i - 1]}" = "$item" ]]; then
-          # this way we prevent unintentional renaming
-          # like `path/something` `path/something-other`,
-          # both would got renamed when matching `path/something`
-          to_install=("${to_install[i - 1]/$item/$build}")
-          break
-        fi
-      done
-      popd >/dev/null
+    pushd "$path" >/dev/null
+    su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -fs"
+    build_failed=$?
+    # NOTE: when force-canceling, users might need to manually do checkout master
+    # otherwise they won't be able to update using yay or whatever I guess...
+    # maybe use git switch -
+    su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
+    if (( build_failed )); then
+      exit 1
     fi
-  done
+    popd >/dev/null
+    find "$path" -maxdepth 1 -type f -name '*.pkg.tar.*' -ctime -1 -exec mv {} "$item" \; -quit
+  fi
 }
 
 cli() {
@@ -600,11 +591,19 @@ cli() {
 
   # Proceed with rest of workflow
   main "${terms[@]}"
-  if [[ $DOWNGRADE_FROM_GIT ]]; then
-    build_pkg
+  if ((DOWNGRADE_FROM_GIT)); then
+    for item in "${to_install[@]}"; do
+      build_pkg "$item"
+    done
   fi
 
   pacman -U "${pacman_args[@]}" "${to_install[@]}"
+  # rename to previous name so we can use it later if we want
+  for file in "${to_install[@]}"; do
+    # TODO: delete this - for some reason on my system it shows that file exists
+    find "${PACMAN_CACHE[@]}" -maxdepth 1 -type f -name "$(basename "$file")" -exec echo {} exists \;
+    find "${PACMAN_CACHE[@]}" -maxdepth 1 -type f -name "$(basename "$file")" -exec mv -v {} "${file/gitpkg/pkg}" \;
+  done
   prompt_to_ignore "${to_ignore[@]}"
 }
 

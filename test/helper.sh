@@ -40,3 +40,11 @@ pacignore() {
       ;;
   esac
 }
+
+git_clone() {
+  cache=$(mktemp -d)
+  if ! [[ -d "$cache/downgrade/.git" ]]; then
+    git clone -q "https://aur.archlinux.org/downgrade.git" "$cache/downgrade"
+  fi
+  write_pacman_conf "[options]" "CacheDir = $cache/"
+}
