@@ -213,7 +213,7 @@ search_git() {
     # that DOES NOT change version as minor like 0.0.1-2 instead of any
     pairs=$(git -C "$path" log -p --oneline --format="GIT: %h" PKGBUILD | grep -e 'GIT:.*' -e '+pkgver' | grep -Pzo 'GIT: .*\n\+pkgver=.*\n' | sed 's/GIT: \|+pkgver=//' | tr -d '\0')
     # shellcheck disable=SC2086
-    echo "$path" $pairs | awk '{for(i=2;i<NF;i+=2) printf "%s-%s-%s-any.gitpkg.tar.gz\n", $1, $(i+1), $i}' | sort -V 
+    echo "$path" $pairs | awk '{for(i=2;i<NF;i+=2) printf "%s-%s-%s-any.gitpkg.tar.gz\n", $1, $(i+1), $i}' | sort -V
   done
 }
 
@@ -570,7 +570,7 @@ build_pkg() {
     # otherwise they won't be able to update using yay or whatever I guess...
     # maybe use git switch -
     su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
-    if (( build_failed )); then
+    if ((build_failed)); then
       exit 1
     fi
     popd >/dev/null
