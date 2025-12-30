@@ -169,8 +169,9 @@ matches_name_version_filter() {
   fi
 
   # version: 2025.11.12.r15.g0eed3fe
-  version_regex="[0-9.]+(.[a-zA-Z0-9])*"
-  pkg_version=$(sed -r "s/.*$name-($version_regex)(-[a-z0-9]{6,})?-(any|$DOWNGRADE_ARCH)\\.(git)?pkg\\.tar\\.(gz|xz|zst)/\1/g" <<<"$pkg")
+  version_regex="[a-zA-Z0-9.]+"
+  hash_or_minor="([0-9]+|[a-z0-9]{6,})"
+  pkg_version=$(sed -r "s/.*$name-($version_regex)(-$hash_or_minor)?-(any|$DOWNGRADE_ARCH)\\.(git)?pkg\\.tar\\.(gz|xz|zst)/\1/g" <<<"$pkg")
   cmp=$(vercmp "$pkg_version" "$search_version")
 
   case "$operator" in
@@ -211,6 +212,7 @@ search_git() {
 
     # TODO: in future could be enhanced by counting every commit
     # that DOES NOT change version as minor like 0.0.1-2 instead of any
+    # pair = abcd12 1.0
     pairs=$(git -C "$path" log -p --oneline --format="GIT: %h" PKGBUILD | grep -e 'GIT:.*' -e '+pkgver' | grep -Pzo 'GIT: .*\n\+pkgver=.*\n' | sed 's/GIT: \|+pkgver=//' | tr -d '\0')
 
     # We could remove packages that are on local machine in this process,
@@ -231,7 +233,9 @@ search_ala() {
   uriname=$(sed 's/+/%2B/g' <<<"$name")
 
   ## in case versioning contains commit hash or something non traditional
-  pkgfile_re="$name-.*-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
+  #pkgfile_re="$uriname-.*-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
+  # or reuse bottom syntax
+  pkgfile_re="$uriname-[^-]+-[0-9.]+-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
   index="$DOWNGRADE_ALA_URL/packages/${uriname:0:1}/$uriname/"
 
   curl --fail --silent "$index" | sed_msg "to parse A.L.A." -E '
@@ -243,8 +247,9 @@ search_cache() {
   local name=$1 pkgfile_re index
 
   # version: 2025.11.12.r15.g0eed3fe
-  version_regex="[0-9.]+(.[a-zA-Z0-9])*"
-  pkgfile_re="$name-($version_regex)(-[a-z0-9]{6,})?-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
+  version_regex="[a-zA-Z0-9.]+"
+  hash_or_minor="([0-9]+|[a-z0-9]{6,})"
+  pkgfile_re="$name-($version_regex)(-$hash_or_minor)?-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
 
   # Delay this defaulting so #read_pacman_conf behavior is tested
   if ((!${#PACMAN_CACHE[@]})); then
@@ -321,7 +326,7 @@ extract_version_parts() {
     s|^.\{'${#pkgname}'\}-\?||;
 
     # Strip package extension
-    s|\.\(git\)?pkg\(\.tar\)\?\(\.[a-z0-9A-Z]\+\)\?$||;
+    s|\.\(git\)\?pkg\(\.tar\)\?\(\.[a-z0-9A-Z]\+\)\?$||;
 
     # (epoch:)?version(-release)?(-arch)? -> epoch,version,release,arch
     s|\(\([^:]*\):\)\?\([^-]*\)\(-\([^-]*\)\)\?\(-\(.*\)\)\?|\2,\3,\5,\7|;
@@ -560,28 +565,32 @@ parse_options() {
 }
 
 build_pkg() {
-  local item="$1" path commit_hash build_failed version release_candidate hash gitpkg_regex
+  local item="$1" path commit_hash build_failed versionreg hashreg gitpkgreg
   if [[ "$item" =~ .*gitpkg.tar.gz ]]; then
-    version='[^-]+[0-9.]+'
-    release_candidate='.[a-zA-Z0-9]*'
-    hash='[a-z0-9]{6,}'
-    gitpkg_regex="(.*)-($version($release_candidate)*|$hash)-($hash)-(any|$DOWNGRADE_ARCH).gitpkg.tar.gz"
+    # version: 2025.11.12.r15.g0eed3fe
+    versionreg="([a-zA-Z0-9]+\.?)*"
+    hashreg='[a-z0-9]{6,}'
+    #hash_or_minor="-([0-9]+|[a-z0-9]{6,})" # leaving this as a note, only hash should appear tho
+    gitpkgreg="(.*)-$versionreg-($hashreg)-(any|$DOWNGRADE_ARCH).gitpkg.tar.gz"
     path=$(dirname "$item")
-    commit_hash=$(sed -r "s/$gitpkg_regex/\4/" <<<"$item")
+    commit_hash=$(sed -r "s/$gitpkgreg/\3/" <<<"$item")
 
     pushd "$path" >/dev/null
-    su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -fs"
+    su -P "$(stat -c"%U" PKGBUILD)" -c "git checkout $commit_hash &>/dev/null && makepkg -fs | tee makepkg.log"
     build_failed=$?
     # NOTE: when force-canceling, users might need to manually do checkout master
-    # otherwise they won't be able to update using yay or whatever I guess...
-    # maybe use git switch -
-    su "$(stat -c"%U" PKGBUILD)" -c "git checkout master &>/dev/null"
+    # otherwise they won't be able to update that pkg using yay or whatever I guess...
+    su "$(stat -c"%U" PKGBUILD)" -c "git switch - &>/dev/null"
     if ((build_failed)); then
       exit 1
     fi
+
+
+    item="$(find "$path" -maxdepth 1 -type f -name "$(sed -nr '/.*Finished making: ([^ ]+) ([^ ]+) .*/{s//\1-\2/;p}' makepkg.log)*" -print -quit)"
+    rm makepkg.log
     popd >/dev/null
-    find "$path" -maxdepth 1 -type f -name '*.pkg.tar.*' -ctime -1 -exec mv {} "$item" \; -quit
   fi
+  printf "%s\0" "$item" >> new_to_install.downgrade
 }
 
 cli() {
@@ -601,13 +610,11 @@ cli() {
     for item in "${to_install[@]}"; do
       build_pkg "$item"
     done
+    mapfile -d '' to_install < new_to_install.downgrade
+    rm new_to_install.downgrade
   fi
 
   pacman -U "${pacman_args[@]}" "${to_install[@]}"
-  # rename to previous name so we can use it later if we want
-  for file in "${to_install[@]}"; do
-    find "${PACMAN_CACHE[@]}" -maxdepth 2 -type f -name "$(basename "$file")" -exec mv -v {} "${file/gitpkg/pkg}" \;
-  done
   prompt_to_ignore "${to_ignore[@]}"
 }
 
