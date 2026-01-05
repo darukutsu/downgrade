@@ -3,7 +3,7 @@
 List remote files for chosen package
 
 
-  $ git_clone
+  $ setup_git_test
   > mkdir "$cache/downgrade-1"
   > mkdir "$cache/downgrade-other"
   > DOWNGRADE_FROM_GIT=1 search_git 'downgrade'

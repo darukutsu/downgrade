@@ -205,8 +205,10 @@ search_git() {
   for cache in "${PACMAN_CACHE[@]}"; do
     path="$cache/$name" # directory name
     if ! [[ -d "$path/.git" ]]; then
-      gettext "\`$path\" not a git directory, skipping..."
-      echo >&2
+      {
+	gettext "\`$path\" not a git directory, skipping..."
+	echo
+      } >&2
       continue
     fi
 
@@ -232,9 +234,6 @@ search_ala() {
   # shellcheck disable=SC2001
   uriname=$(sed 's/+/%2B/g' <<<"$name")
 
-  ## in case versioning contains commit hash or something non traditional
-  #pkgfile_re="$uriname-.*-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
-  # or reuse bottom syntax
   pkgfile_re="$uriname-[^-]+-[0-9.]+-(any|$DOWNGRADE_ARCH)\\.pkg\\.tar\\.(gz|xz|zst)"
   index="$DOWNGRADE_ALA_URL/packages/${uriname:0:1}/$uriname/"
 
@@ -290,7 +289,6 @@ output_package() {
   fi
 
   # Remote or local file
-  #if [[ $path =~ ^/ && -f $path ]]; then # this is maybe better approach however we lose ability to prefix files
   if [[ $path =~ ^/ && ! ($path =~ gitpkg) ]]; then
     location="$(dirname "$path")"
     timestamp=$(stat -c '%y' "$path" | cut -d' ' -f1)

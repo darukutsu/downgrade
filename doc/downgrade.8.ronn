@@ -73,7 +73,16 @@ on the ALA.
     otherwise defaults to _/var/log/pacman.log_.
 
   * `--git`:
-    Uses git for choosing version, viable only for aur packages
+    If the pacman cache contains the source repository for the package (e.g. if you use yay
+    and are downgrading an AUR package), present any version-like tags as available for
+    downgrading (together with cached packages if present). If selected, build and 
+    install the package from sources checked out at that tag.
+
+    Example: Present cached `downgrade` pkgbuilds together with tags with 
+	     version greater than 9. Since `bash` is extra package it will be
+	     provided as usual one.
+
+   # downgrade --git --pacman-cache ~/.cache/yay --maxdepth 2 'downgrade>9.0.0' bash
 
   * `--maxdepth`=<INTEGER>:
     Maximum depth to search for cached packages, defaults to _1_.

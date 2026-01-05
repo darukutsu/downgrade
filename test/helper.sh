@@ -41,7 +41,7 @@ pacignore() {
   esac
 }
 
-git_clone() {
+setup_git_test() {
   cache=$(mktemp -d)
   if ! [[ -d "$cache/downgrade/.git" ]]; then
     git clone -q "https://aur.archlinux.org/downgrade.git" "$cache/downgrade"
