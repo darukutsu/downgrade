@@ -10,3 +10,4 @@ locale/*
 !locale/*.po
 
 test/**/*.t.err
+testing-cache
