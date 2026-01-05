@@ -171,7 +171,7 @@ matches_name_version_filter() {
   # version: 2025.11.12.r15.g0eed3fe
   version_regex="[a-zA-Z0-9.]+"
   hash_or_minor="([0-9]+|[a-z0-9]{6,})"
-  pkg_version=$(sed -r "s/.*$name-($version_regex)(-$hash_or_minor)?-(any|$DOWNGRADE_ARCH)\\.(git)?pkg\\.tar\\.(gz|xz|zst)/\1/g" <<<"$pkg")
+  pkg_version=$(sed -r "s/.*$name-($version_regex)(-$hash_or_minor)?-(any|$DOWNGRADE_ARCH)\\.(git)?pkg\\.tar\\.(gz|xz|zst)/\1\2/g" <<<"$pkg")
   cmp=$(vercmp "$pkg_version" "$search_version")
 
   case "$operator" in
@@ -202,6 +202,11 @@ matches_name_version_filter() {
 search_git() {
   local name=$1 pairs path
 
+  # Delay this defaulting so #read_pacman_conf behavior is tested
+  if ((!${#PACMAN_CACHE[@]})); then
+    mapfile -t PACMAN_CACHE < <(read_pacman_conf CacheDir)
+  fi
+
   for cache in "${PACMAN_CACHE[@]}"; do
     path="$cache/$name" # directory name
     if ! [[ -d "$path/.git" ]]; then
@@ -217,8 +222,6 @@ search_git() {
     # pair = abcd12 1.0
     pairs=$(git -C "$path" log -p --oneline --format="GIT: %h" PKGBUILD | grep -e 'GIT:.*' -e '+pkgver' | grep -Pzo 'GIT: .*\n\+pkgver=.*\n' | sed 's/GIT: \|+pkgver=//' | tr -d '\0')
 
-    # We could remove packages that are on local machine in this process,
-    # however since pathname can be anything except '\0' its better to rename output pkg
     # shellcheck disable=SC2086
     echo "$path/$name" $pairs | awk '{for(i=2;i<NF;i+=2) printf "%s-%s-%s-any.gitpkg.tar.gz\n", $1, $(i+1), $i}' | sort -V
   done
