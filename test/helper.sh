@@ -46,5 +46,5 @@ setup_git_test() {
   if ! [[ -d "$cache/downgrade/.git" ]]; then
     git clone -q "https://aur.archlinux.org/downgrade.git" "$cache/downgrade"
   fi
-  write_pacman_conf "[options]" "CacheDir = $cache/"
+  write_pacman_conf "[options]" "CacheDir = $cache"
 }
