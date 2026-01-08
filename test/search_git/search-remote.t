@@ -3,12 +3,9 @@
 List remote files for chosen package
 
 
-because cram does not support multi-line regex matching we have to match this way
   $ setup_git_test
   > mkdir "$cache/downgrade-1"
   > mkdir "$cache/downgrade-other"
-  > DOWNGRADE_FROM_GIT=1 search_git 'downgrade' > file.matches
-  > grep -vP '/tmp/.*/downgrade-([a-zA-Z0-9.]+)-.+-any.gitpkg.tar.gz' file.matches
-  > echo end
-  end
-
+  > DOWNGRADE_FROM_GIT=1 search_git 'downgrade' | head -n2
+  /tmp/*/downgrade-5.1.3-0bdb507-any.gitpkg.tar.gz (glob)
+  /tmp/*/downgrade-5.1.4-dee7bd9-any.gitpkg.tar.gz (glob)
