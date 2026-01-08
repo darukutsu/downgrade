@@ -211,8 +211,8 @@ search_git() {
     path="$cache/$name" # directory name
     if ! [[ -d "$path/.git" ]]; then
       {
-	gettext "\`$path\" not a git directory, skipping..."
-	echo
+        gettext "\`$path\" not a git directory, skipping..."
+        echo
       } >&2
       continue
     fi
@@ -586,12 +586,11 @@ build_pkg() {
       exit 1
     fi
 
-
     item="$(find "$path" -maxdepth 1 -type f -name "$(sed -nr '/.*Finished making: ([^ ]+) ([^ ]+) .*/{s//\1-\2/;p}' makepkg.log)*" -print -quit)"
     rm makepkg.log
     popd >/dev/null
   fi
-  printf "%s\0" "$item" >> new_to_install.downgrade
+  printf "%s\0" "$item" >>new_to_install.downgrade
 }
 
 cli() {
@@ -611,7 +610,7 @@ cli() {
     for item in "${to_install[@]}"; do
       build_pkg "$item"
     done
-    mapfile -d '' to_install < new_to_install.downgrade
+    mapfile -d '' to_install <new_to_install.downgrade
     rm new_to_install.downgrade
   fi
 
